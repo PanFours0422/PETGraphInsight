@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PET探测器阵列可视化平台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        .control-panel {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            height: 100%;
+        }
+
+        .visualization-container {
+            height: 800px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+        }
+
+        .preview-panel {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            height: 100%;
+        }
+
+        .preview-container {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+            margin-bottom: 20px;
+        }
+
+        .prediction-panel {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .prediction-container {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+<div class="container-fluid py-4">
+    <h1 class="text-center mb-4">PET探测器阵列可视化平台</h1>
+
+    <div class="row">
+        <!-- 可视化区域 -->
+        <div class="col-md-6">
+            <div class="visualization-container" id="visualization"></div>
+        </div>
+
+        <!-- 数据预览面板 -->
+        <div class="col-md-3">
+            <div class="preview-panel">
+                <h4>数据预览</h4>
+                <div class="mb-3">
+                    <label class="form-label">预览类型</label>
+                    <select class="form-select" id="previewType" onchange="updatePreview()">
+                        <option value="detectors">探测器位置</option>
+                        <option value="events">事件数据</option>
+                    </select>
+                </div>
+                <div class="preview-container" id="previewContent">
+                    <!-- 预览内容将通过JavaScript动态填充 -->
+                </div>
+
+                <!-- 预测结果预览面板 -->
+                <div class="prediction-panel" id="predictionPanel">
+                    <h4>预测结果预览</h4>
+                    <div class="mb-3">
+                        <label class="form-label">预览类型</label>
+                        <select class="form-select" id="predictionType" onchange="updatePredictionPreview()">
+                            <option value="all">全部结果</option>
+                            <option value="high">高耦合区域</option>
+                            <option value="low">低耦合区域</option>
+                        </select>
+                    </div>
+                    <div class="prediction-container" id="predictionContent">
+                        <!-- 预测结果将通过JavaScript动态填充 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 控制面板 -->
+        <div class="col-md-3">
+            <div class="control-panel">
+                    <h4>数据生成参数</h4>
+                    <div class="mb-3">
+                        <label class="form-label">探测器数量</label>
+                        <input type="number" class="form-control" id="numDetectors" value="100" min="100" max="10000">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">事件数量</label>
+                        <input type="number" class="form-control" id="numEvents" value="1000" min="1000" max="100000">
+                    </div>
+                    <button class="btn btn-primary w-100 mb-3" id="generateDataBtn" onclick="generateData()">生成数据</button>
+
+                    <h4 class="mt-4">图构建</h4>
+                    <button class="btn btn-primary w-100 mb-3" id="buildGraphBtn" onclick="buildGraph()">构建PET图</button>
+
+                    <h4 class="mt-4">耦合预测</h4>
+                    <button class="btn btn-primary w-100 mb-3" id="predictBtn" onclick="predictCoupling()">预测耦合度</button>
+                    
+                    <!-- 添加耦合度筛选控件 -->
+                    <div class="coupling-filter mb-3" style="display: none;">
+                        <h5>耦合度筛选</h5>
+                        <div class="mb-3">
+                            <label class="form-label">筛选条件</label>
+                            <select class="form-select" id="couplingFilterType">
+                                <option value="low">低于阈值</option>
+                                <option value="high">高于阈值</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">阈值: <span id="thresholdValue">0.5000</span></label>
+                            <div class="d-flex align-items-center gap-2">
+                                <input type="range" class="form-range flex-grow-1" id="couplingThreshold" 
+                                       value="0.5" min="0" max="1" step="0.0001"
+                                       oninput="updateThresholdValue(this.value)">
+                                <input type="number" class="form-control" id="thresholdInput" 
+                                       value="0.5000" min="0" max="1" step="0.0001"
+                                       style="width: 100px;"
+                                       onchange="updateThresholdFromInput(this.value)">
+                            </div>
+                        </div>
+                        <button class="btn btn-success w-100" id="visualizeLowCouplingBtn" 
+                                onclick="visualizeCoupling()">可视化耦合区域</button>
+                    </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 生成数据
+    async function generateData() {
+        const button = document.getElementById('generateDataBtn');
+        const numDetectors = document.getElementById('numDetectors').value;
+        const numEvents = document.getElementById('numEvents').value;
+
+        try {
+            button.disabled = true;
+            button.innerHTML = '生成中...';
+            
+            const response = await fetch('/api/generate_data', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    num_detectors: parseInt(numDetectors),
+                    num_events: parseInt(numEvents)
+                })
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                    alert(result.message);
+                updatePreview();
+                updateVisualization();
+            } else {
+                alert('数据生成失败：' + result.message);
+            }
+        } catch (error) {
+            alert('请求失败：' + error);
+            } finally {
+                button.disabled = false;
+                button.innerHTML = '生成数据';
+        }
+    }
+
+    // 更新预览
+    async function updatePreview() {
+        const previewType = document.getElementById('previewType').value;
+
+        try {
+            const response = await fetch(`/api/preview_data?type=${previewType}&limit=100`);
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                const previewContent = document.getElementById('previewContent');
+
+                if (result.data.type === 'detectors') {
+                    // 显示探测器位置预览
+                    const positions = result.data.positions;
+                    previewContent.innerHTML = `
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>探测器ID</th>
+                                    <th>X坐标</th>
+                                    <th>Y坐标</th>
+                                    <th>Z坐标</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${positions.map((pos, idx) => `
+                                    <tr>
+                                        <td>${idx + 1}</td>
+                                        <td>${pos[0].toFixed(2)}</td>
+                                        <td>${pos[1].toFixed(2)}</td>
+                                        <td>${pos[2].toFixed(2)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                } else if (result.data.type === 'events') {
+                    // 显示事件预览
+                    const events = result.data.events;
+                    previewContent.innerHTML = `
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>事件ID</th>
+                                    <th>探测器1位置</th>
+                                    <th>探测器2位置</th>
+                                    <th>能量1</th>
+                                    <th>能量2</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${events.map((event, idx) => `
+                                    <tr>
+                                        <td>${idx + 1}</td>
+                                        <td>(${event.pos_i_x.toFixed(2)}, ${event.pos_i_y.toFixed(2)}, ${event.pos_i_z.toFixed(2)})</td>
+                                        <td>(${event.pos_j_x.toFixed(2)}, ${event.pos_j_y.toFixed(2)}, ${event.pos_j_z.toFixed(2)})</td>
+                                        <td>${event.energy_i.toFixed(2)}</td>
+                                        <td>${event.energy_j.toFixed(2)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                }
+            } else {
+                alert('预览更新失败：' + result.message);
+            }
+        } catch (error) {
+            alert('请求失败：' + error);
+        }
+    }
+
+    // 更新可视化
+    async function updateVisualization() {
+        try {
+            const response = await fetch('/api/preview_data?type=detectors&limit=10000');
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                const positions = result.data.positions;
+
+                // 准备3D散点图数据
+                const trace = {
+                    x: positions.map(p => p[0]),
+                    y: positions.map(p => p[1]),
+                    z: positions.map(p => p[2]),
+                    mode: 'markers',
+                    type: 'scatter3d',
+                    marker: {
+                        size: 2,
+                        color: 'blue',
+                        opacity: 0.8
+                    },
+                    name: '探测器位置'
+                };
+
+                const layout = {
+                    title: 'PET探测器阵列3D可视化',
+                    scene: {
+                        xaxis: {title: 'X'},
+                        yaxis: {title: 'Y'},
+                        zaxis: {title: 'Z'},
+                        aspectmode: 'manual',  // 手动指定比例
+                        aspectratio: {x: 1, y: 1, z: 1}  // XYZ 轴比例相等
+                    },
+                    margin: {
+                        l: 0,
+                        r: 0,
+                        b: 0,
+                        t: 30
+                    },
+                    showlegend: true
+                };
+
+                Plotly.newPlot('visualization', [trace], layout);
+            }
+        } catch (error) {
+            alert('可视化更新失败：' + error);
+        }
+    }
+
+    // 获取所有探测器位置
+    async function getAllDetectorPositions() {
+        try {
+            const response = await fetch('/api/preview_data?type=detectors&limit=10000');
+            const result = await response.json();
+            if (result.status === 'success') {
+                return result.data.positions;
+            }
+            return [];
+        } catch (error) {
+            console.error('获取探测器位置失败：', error);
+            return [];
+        }
+    }
+
+    // 构建图
+    async function buildGraph() {
+        const button = document.getElementById('buildGraphBtn');
+        
+        try {
+            button.disabled = true;
+            button.innerHTML = '构建中...';
+            
+            const response = await fetch('/api/build_graph', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                alert(result.message);
+            } else {
+                alert('图构建失败：' + result.message);
+            }
+        } catch (error) {
+            alert('请求失败：' + error);
+        } finally {
+            button.disabled = false;
+            button.innerHTML = '构建PET图';
+        }
+    }
+
+    // 预测耦合度
+    async function predictCoupling() {
+        const button = document.getElementById('predictBtn');
+        const filterPanel = document.querySelector('.coupling-filter');
+        
+        try {
+            button.disabled = true;
+            button.innerHTML = '预测中...';
+            
+            const response = await fetch('/api/predict', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                alert(result.message);
+                // 显示预测结果面板
+                document.getElementById('predictionPanel').style.display = 'block';
+                // 显示筛选面板
+                filterPanel.style.display = 'block';
+                // 更新预测结果预览
+                updatePredictionPreview();
+            } else {
+                alert('预测失败：' + result.message);
+            }
+        } catch (error) {
+            alert('请求失败：' + error);
+        } finally {
+            button.disabled = false;
+            button.innerHTML = '预测耦合度';
+        }
+    }
+
+    // 更新阈值显示
+    function updateThresholdValue(value) {
+        const formattedValue = parseFloat(value).toFixed(4);
+        document.getElementById('thresholdValue').textContent = formattedValue;
+        document.getElementById('thresholdInput').value = formattedValue;
+    }
+
+    // 从输入框更新阈值
+    function updateThresholdFromInput(value) {
+        const numValue = parseFloat(value);
+        if (isNaN(numValue) || numValue < 0 || numValue > 1) {
+            alert('请输入0到1之间的数值');
+            return;
+        }
+        const formattedValue = numValue.toFixed(4);
+        document.getElementById('couplingThreshold').value = formattedValue;
+        document.getElementById('thresholdValue').textContent = formattedValue;
+    }
+
+    // 可视化耦合区域
+    async function visualizeCoupling() {
+        const button = document.getElementById('visualizeLowCouplingBtn');
+        const filterType = document.getElementById('couplingFilterType').value;
+        const threshold = parseFloat(document.getElementById('couplingThreshold').value);
+        
+        try {
+            button.disabled = true;
+            button.innerHTML = '可视化中...';
+            
+            // 获取所有探测器位置
+            const detectorPositions = await getAllDetectorPositions();
+            
+            const response = await fetch('/api/get_low_coupling_pairs');
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                const pairs = result.data.low_coupling_pairs;
+                
+                // 根据筛选条件过滤数据
+                const filteredPairs = pairs.filter(pair => {
+                    const prob = pair.coupling_probability;
+                    return filterType === 'low' ? prob < threshold : prob > threshold;
+                });
+                
+                if (filteredPairs.length === 0) {
+                    alert('没有找到符合条件的耦合区域');
+                    return;
+                }
+                
+                // 准备3D散点图数据
+                const traces = [];
+                
+                // 添加所有探测器位置
+                traces.push({
+                    x: detectorPositions.map(p => p[0]),
+                    y: detectorPositions.map(p => p[1]),
+                    z: detectorPositions.map(p => p[2]),
+                    mode: 'markers',
+                    type: 'scatter3d',
+                    name: '探测器位置',
+                    marker: {
+                        size: 2,
+                        color: 'blue',
+                        opacity: 0.3
+                    }
+                });
+                
+                // 添加耦合区域中点
+                traces.push({
+                    x: filteredPairs.map(pair => pair.midpoint[0]),
+                    y: filteredPairs.map(pair => pair.midpoint[1]),
+                    z: filteredPairs.map(pair => pair.midpoint[2]),
+                    mode: 'markers',
+                    type: 'scatter3d',
+                    name: filterType === 'low' ? '低耦合区域' : '高耦合区域',
+                    marker: {
+                        size: 5,
+                        color: filteredPairs.map(pair => pair.coupling_probability),
+                        colorscale: 'Viridis',
+                        colorbar: {
+                            title: '耦合概率',
+                            titleside: 'right'
+                        },
+                        opacity: 0.8
+                    },
+                    text: filteredPairs.map(pair => 
+                        `探测器对: ${pair.detector_pair[0]}-${pair.detector_pair[1]}<br>` +
+                        `耦合概率: ${pair.coupling_probability.toFixed(4)}<br>` +
+                        `能量1: ${pair.energy_i.toFixed(2)} keV<br>` +
+                        `能量2: ${pair.energy_j.toFixed(2)} keV<br>` +
+                        `时间差: ${Math.abs(pair.timestamp_j - pair.timestamp_i).toFixed(2)} ns`
+                    ),
+                    hoverinfo: 'text'
+                });
+                
+                // 添加探测器对之间的连线
+                filteredPairs.forEach(pair => {
+                    traces.push({
+                        x: [pair.detector_i_pos[0], pair.detector_j_pos[0]],
+                        y: [pair.detector_i_pos[1], pair.detector_j_pos[1]],
+                        z: [pair.detector_i_pos[2], pair.detector_j_pos[2]],
+                        mode: 'lines',
+                        type: 'scatter3d',
+                        name: `探测器对 ${pair.detector_pair[0]}-${pair.detector_pair[1]}`,
+                        line: {
+                            color: 'rgba(255, 0, 0, 0.3)',
+                            width: 1
+                        },
+                        showlegend: false
+                    });
+                });
+                
+                const layout = {
+                    title: `PET探测器阵列${filterType === 'low' ? '低' : '高'}耦合区域可视化 (阈值: ${threshold.toFixed(4)})`,
+                    scene: {
+                        xaxis: {title: 'X'},
+                        yaxis: {title: 'Y'},
+                        zaxis: {title: 'Z'},
+                        aspectmode: 'manual',  // 手动指定比例
+                        aspectratio: {x: 1, y: 1, z: 1}  // XYZ 轴比例相等
+                    },
+                    margin: {
+                        l: 0,
+                        r: 0,
+                        b: 0,
+                        t: 30
+                    },
+                    showlegend: true
+                };
+                
+                Plotly.newPlot('visualization', traces, layout);
+            } else {
+                alert('获取耦合区域数据失败：' + result.message);
+            }
+        } catch (error) {
+            alert('请求失败：' + error);
+        } finally {
+            button.disabled = false;
+            button.innerHTML = '可视化耦合区域';
+        }
+    }
+
+    // 更新预测结果预览
+    async function updatePredictionPreview() {
+        try {
+            const predictionType = document.getElementById('predictionType').value;
+            const response = await fetch(`/api/preview_prediction?type=${predictionType}`);
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                const predictionContent = document.getElementById('predictionContent');
+                const predictions = result.data.predictions;
+                
+                predictionContent.innerHTML = `
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>样本ID</th>
+                                <th>耦合度</th>
+                                <th>低耦合概率</th>
+                                <th>高耦合概率</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${predictions.map((pred, idx) => `
+                                <tr>
+                                    <td>${idx + 1}</td>
+                                    <td>${pred.coupling_level}</td>
+                                    <td>${pred.probabilities[0].toFixed(4)}</td>
+                                    <td>${pred.probabilities[1].toFixed(4)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            }
+        } catch (error) {
+            alert('预览更新失败：' + error);
+        }
+    }
+</script>
+</body>
+</html> 
