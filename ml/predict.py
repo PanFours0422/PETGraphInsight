@@ -59,6 +59,74 @@ def predict_coupling(model, subgraphs, device):
     
     return np.array(predictions), np.array(probabilities)
 
+
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc
+import matplotlib.pyplot as plt
+from matplotlib import rcParams
+
+# 指定全局字体为黑体（SimHei），解决中文乱码
+rcParams['font.sans-serif'] = ['SimHei']  # 黑体
+rcParams['axes.unicode_minus'] = False    # 解决负号 '-' 显示为方块的问题
+
+def analyze_predictions(predictions, probabilities, data_dir, results_dir):
+    """对比预测结果与真实标签，并生成分析报告与可视化图表"""
+    labels_path = os.path.join(data_dir, "labels.pt")
+    true_labels = torch.load(labels_path).numpy()
+
+    # 分类报告
+    print("\n分类报告:")
+    print(classification_report(true_labels, predictions, target_names=["低耦合", "高耦合"]))
+
+    # 混淆矩阵
+    cm = confusion_matrix(true_labels, predictions)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["低耦合", "高耦合"])
+    disp.plot(cmap=plt.cm.Blues)
+    plt.title("混淆矩阵")
+    plt.savefig(os.path.join(results_dir, "confusion_matrix.png"))
+    plt.close()
+
+    # ROC 曲线
+    fpr, tpr, _ = roc_curve(true_labels, probabilities[:, 1])
+    roc_auc = auc(fpr, tpr)
+
+    plt.figure()
+    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC 曲线 (AUC = {roc_auc:.2f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=1, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('假阳性率 (FPR)')
+    plt.ylabel('真正率 (TPR)')
+    plt.title('ROC 曲线')
+    plt.legend(loc="lower right")
+    plt.savefig(os.path.join(results_dir, "roc_curve.png"))
+    plt.close()
+
+    # 正确/错误分类柱状图
+    correct = predictions == true_labels
+    correct_count = np.sum(correct)
+    incorrect_count = len(predictions) - correct_count
+
+    plt.figure()
+    plt.bar(['预测正确', '预测错误'], [correct_count, incorrect_count], color=['green', 'red'])
+    plt.title('预测结果统计')
+    plt.ylabel('样本数量')
+    plt.savefig(os.path.join(results_dir, 'prediction_accuracy_bar.png'))
+    plt.close()
+
+    # 写入详细比对信息
+    with open(os.path.join(results_dir, 'prediction_details.txt'), 'a', encoding='utf-8') as f:
+        f.write("\n预测 vs 真实比对:\n")
+        f.write("-" * 50 + "\n")
+        for i, (pred, prob, true_label) in enumerate(zip(predictions, probabilities, true_labels)):
+            f.write(f"样本 {i + 1}:\n")
+            f.write(f"预测类别: {'高耦合' if pred == 1 else '低耦合'}\n")
+            f.write(f"真实类别: {'高耦合' if true_label == 1 else '低耦合'}\n")
+            f.write(f"预测是否正确: {'是' if pred == true_label else '否'}\n")
+            f.write(f"低耦合概率: {prob[0]:.4f}\n")
+            f.write(f"高耦合概率: {prob[1]:.4f}\n")
+            f.write("-" * 30 + "\n")
+
+
 def main():
     # 设置设备
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -117,6 +185,9 @@ def main():
             f.write(f"低耦合概率: {prob[0]:.4f}\n")
             f.write(f"高耦合概率: {prob[1]:.4f}\n")
             f.write("-" * 30 + "\n")
+
+        # 分析预测结果
+    analyze_predictions(predictions, probabilities, data_dir, results_dir)
 
 if __name__ == "__main__":
     main() 

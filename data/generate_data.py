@@ -110,7 +110,7 @@ def main():
     parser = argparse.ArgumentParser(description='生成PET系统模拟数据')
     parser.add_argument('--num_detectors', type=int, default=100,
                         help='探测器数量')
-    parser.add_argument('--num_events', type=int, default=1000,
+    parser.add_argument('--num_events', type=int, default=3000,
                         help='有效事件数量')
     args = parser.parse_args()
 
